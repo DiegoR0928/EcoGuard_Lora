@@ -1,0 +1,2 @@
+# El script de inicialización de Postgres corre en Linux: con CRLF falla
+*.sh text eol=lf

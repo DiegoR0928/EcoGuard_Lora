@@ -1,0 +1,38 @@
+# docker-compose.yml (en la raíz)
+
+# Servidor de red LoRaWAN (ChirpStack) y su simulador: ver chirpstack/docker-compose.yml
+include:
+  - chirpstack/docker-compose.yml
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    volumes:
+      - ecoguard_db_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=ecoguard
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  web:
+    build: ./backend   
+    volumes:
+      - ./backend:/app 
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgis://postgres:postgres@db:5432/ecoguard
+      - CHANNEL_LAYERS_REDIS_URL=redis://redis:6379/1
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  ecoguard_db_data:

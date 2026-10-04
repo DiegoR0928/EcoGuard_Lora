@@ -100,7 +100,7 @@ class _DashboardSOSScreenState extends State<DashboardSOSScreen> {
             decoration: BoxDecoration(
               color: Colors.red[700],
               shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: Colors.red.withOpacity(0.5), blurRadius: 30, spreadRadius: 10)],
+              boxShadow: [BoxShadow(color: Colors.red.withValues(alpha: 0.5), blurRadius: 30, spreadRadius: 10)],
             ),
             child: const Center(
               child: Text("S O S", style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 4)),

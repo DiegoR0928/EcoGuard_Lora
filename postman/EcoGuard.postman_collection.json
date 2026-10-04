@@ -1,0 +1,772 @@
+{
+  "info": {
+    "name": "EcoGuard Backend",
+    "description": "Pruebas del backend de EcoGuard: webhook directo, API REST, ChirpStack y el simulador de nodo.\n\nLevanta todo con `docker compose up -d` en EcoGuard_Lora antes de ejecutarla.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "dev_eui",
+      "value": "a1b2c3d4e5f67890"
+    },
+    {
+      "key": "gateway_eui",
+      "value": "0016c001ff10a235"
+    },
+    {
+      "key": "fcnt",
+      "value": "0"
+    },
+    {
+      "key": "cs_url",
+      "value": "http://localhost:8090"
+    },
+    {
+      "key": "cs_token",
+      "value": ""
+    },
+    {
+      "key": "sim_url",
+      "value": "http://localhost:8070"
+    },
+    {
+      "key": "sim_dev_eui",
+      "value": "EC00000000000001"
+    },
+    {
+      "key": "sim_app_key",
+      "value": "57754FE051D08FD790D42C9795BE3729"
+    },
+    {
+      "key": "tenant_id",
+      "value": "292de1d7-3ade-41e5-9ab3-07da2bb4ec42"
+    },
+    {
+      "key": "perfil_sim_id",
+      "value": "b2b5605f-ca8d-4a68-b730-af6ff9605f6f"
+    },
+    {
+      "key": "perfil_real_id",
+      "value": "28f81a3b-0107-49b2-906b-99c352334b07"
+    },
+    {
+      "key": "app_id",
+      "value": "949d2b5e-c162-4958-a533-4dedfab94261"
+    },
+    {
+      "key": "nodo_real_dev_eui",
+      "value": "F85B1BFFFEA23B60"
+    },
+    {
+      "key": "nodo_real_app_key",
+      "value": ""
+    },
+    {
+      "key": "nodo_real_nwk_key",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Webhook directo (sin ChirpStack)",
+      "description": "Llama al webhook como si fuera ChirpStack, sin pasar por él. Útil para probar solo el backend.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Simula el contador de tramas LoRaWAN: cada envío incrementa fCnt",
+              "const fcnt = Number(pm.collectionVariables.get('fcnt') || 0) + 1;",
+              "pm.collectionVariables.set('fcnt', fcnt);"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "1.1 SOS con GPS (abre incidente)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/webhook/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"time\": \"{{$isoTimestamp}}\",\n  \"deviceInfo\": {\n    \"devEui\": \"{{dev_eui}}\",\n    \"deviceName\": \"Heltec-04\"\n  },\n  \"fCnt\": {{fcnt}},\n  \"object\": {\n    \"latitude\": 22.7758,\n    \"longitude\": -102.5714,\n    \"sos\": true,\n    \"battery_mv\": 3850\n  },\n  \"rxInfo\": [\n    {\n      \"gatewayId\": \"{{gateway_eui}}\",\n      \"rssi\": -97,\n      \"snr\": 7.5\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "1.2 Nueva posición (se agrupa en el mismo incidente)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/webhook/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"time\": \"{{$isoTimestamp}}\",\n  \"deviceInfo\": {\n    \"devEui\": \"{{dev_eui}}\"\n  },\n  \"fCnt\": {{fcnt}},\n  \"object\": {\n    \"latitude\": 22.7765,\n    \"longitude\": -102.5720,\n    \"sos\": false,\n    \"battery_mv\": 3840\n  },\n  \"rxInfo\": [\n    {\n      \"gatewayId\": \"{{gateway_eui}}\",\n      \"rssi\": -101,\n      \"snr\": 5.25\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "1.3 Trama sin GPS (punto nulo)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/webhook/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"time\": \"{{$isoTimestamp}}\",\n  \"deviceInfo\": {\n    \"devEui\": \"{{dev_eui}}\"\n  },\n  \"fCnt\": {{fcnt}},\n  \"object\": {\n    \"sos\": true,\n    \"battery_mv\": 3830\n  },\n  \"rxInfo\": [\n    {\n      \"gatewayId\": \"{{gateway_eui}}\",\n      \"rssi\": -118,\n      \"snr\": -6.5\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "1.4 Evento que no es uplink (se ignora)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK, ignorado', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/webhook/?event=join",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceInfo\": {\n    \"devEui\": \"{{dev_eui}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "1.5 Error: trama sin devEui",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/webhook/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"object\": {\n    \"latitude\": 22.7758,\n    \"longitude\": -102.5714,\n    \"sos\": true\n  }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. API REST",
+      "item": [
+        {
+          "name": "Incidentes activos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve una lista', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/incidentes/activos/"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. ChirpStack: registrar (una vez)",
+      "description": "Registra en ChirpStack todo lo que usa EcoGuard. Ya quedó registrado al montar ChirpStack; córrelo solo si borras el volumen de ChirpStack (docker compose down -v).\n\nRequiere un API key: abre http://localhost:8080 (admin / admin) → API keys → Add API key, y pega el token en la variable cs_token de la colección.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{cs_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "3.1 Tenant (guarda tenant_id)",
+          "request": {
+            "method": "GET",
+            "url": "{{cs_url}}/api/tenants?limit=1",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('tenant_id', pm.response.json().result[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.2 Perfil nodo simulado (LoRaWAN 1.0.3)",
+          "request": {
+            "method": "POST",
+            "url": "{{cs_url}}/api/device-profiles",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceProfile\": {\n    \"tenantId\": \"{{tenant_id}}\",\n    \"name\": \"EcoGuard nodo simulado (LoRaWAN 1.0.3)\",\n    \"region\": \"US915\",\n    \"regionConfigId\": \"us915_1\",\n    \"macVersion\": \"LORAWAN_1_0_3\",\n    \"regParamsRevision\": \"A\",\n    \"supportsOtaa\": true,\n    \"adrAlgorithmId\": \"default\",\n    \"uplinkInterval\": 600,\n    \"payloadCodecRuntime\": \"JS\",\n    \"payloadCodecScript\": \"// Decodificador de ChirpStack v4 para los nodos EcoGuard.\\n// Se pega en: Device profile → Codec → \\\"JavaScript functions\\\".\\n// Formato de la trama: ver EcoGuard-Node/README.md\\n//\\n// Devuelve los campos que lee el webhook del backend: sos, latitude, longitude, battery_mv.\\n\\nfunction decodeUplink(input) {\\n  var b = input.bytes;\\n  if (input.fPort !== 1 || b.length < 3) {\\n    return { errors: [\\\"Trama EcoGuard invalida (puerto \\\" + input.fPort + \\\", \\\" + b.length + \\\" bytes)\\\"] };\\n  }\\n\\n  var banderas = b[0];\\n  var data = {\\n    sos: (banderas & 0x01) !== 0,\\n    cancelado: (banderas & 0x04) !== 0,\\n    battery_mv: b[1] | (b[2] << 8)\\n  };\\n\\n  // Sin fix GPS la trama no trae coordenadas: el backend guarda el punto como nulo\\n  if ((banderas & 0x02) !== 0 && b.length >= 11) {\\n    data.latitude = int32LE(b, 3) / 1e6;\\n    data.longitude = int32LE(b, 7) / 1e6;\\n  }\\n\\n  return { data: data };\\n}\\n\\n// En JavaScript, << trabaja con enteros de 32 bits con signo: las coordenadas negativas salen bien\\nfunction int32LE(b, i) {\\n  return b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);\\n}\\n\"\n  }\n}"
+            },
+            "description": "Incluye chirpstack/codec.js. Si cambias el codec, actualízalo también aquí o en la interfaz."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('perfil_sim_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.3 Perfil nodo Heltec real (LoRaWAN 1.1.0)",
+          "request": {
+            "method": "POST",
+            "url": "{{cs_url}}/api/device-profiles",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceProfile\": {\n    \"tenantId\": \"{{tenant_id}}\",\n    \"name\": \"EcoGuard nodo Heltec V4 (LoRaWAN 1.1.0)\",\n    \"region\": \"US915\",\n    \"regionConfigId\": \"us915_1\",\n    \"macVersion\": \"LORAWAN_1_1_0\",\n    \"regParamsRevision\": \"RP002_1_0_3\",\n    \"supportsOtaa\": true,\n    \"adrAlgorithmId\": \"default\",\n    \"uplinkInterval\": 600,\n    \"payloadCodecRuntime\": \"JS\",\n    \"payloadCodecScript\": \"// Decodificador de ChirpStack v4 para los nodos EcoGuard.\\n// Se pega en: Device profile → Codec → \\\"JavaScript functions\\\".\\n// Formato de la trama: ver EcoGuard-Node/README.md\\n//\\n// Devuelve los campos que lee el webhook del backend: sos, latitude, longitude, battery_mv.\\n\\nfunction decodeUplink(input) {\\n  var b = input.bytes;\\n  if (input.fPort !== 1 || b.length < 3) {\\n    return { errors: [\\\"Trama EcoGuard invalida (puerto \\\" + input.fPort + \\\", \\\" + b.length + \\\" bytes)\\\"] };\\n  }\\n\\n  var banderas = b[0];\\n  var data = {\\n    sos: (banderas & 0x01) !== 0,\\n    cancelado: (banderas & 0x04) !== 0,\\n    battery_mv: b[1] | (b[2] << 8)\\n  };\\n\\n  // Sin fix GPS la trama no trae coordenadas: el backend guarda el punto como nulo\\n  if ((banderas & 0x02) !== 0 && b.length >= 11) {\\n    data.latitude = int32LE(b, 3) / 1e6;\\n    data.longitude = int32LE(b, 7) / 1e6;\\n  }\\n\\n  return { data: data };\\n}\\n\\n// En JavaScript, << trabaja con enteros de 32 bits con signo: las coordenadas negativas salen bien\\nfunction int32LE(b, i) {\\n  return b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);\\n}\\n\"\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('perfil_real_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.4 Aplicación EcoGuard",
+          "request": {
+            "method": "POST",
+            "url": "{{cs_url}}/api/applications",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"application\": {\n    \"tenantId\": \"{{tenant_id}}\",\n    \"name\": \"EcoGuard\",\n    \"description\": \"Nodos de rescate EcoGuard\"\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('app_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.5 Integración HTTP → webhook de Django",
+          "request": {
+            "method": "POST",
+            "url": "{{cs_url}}/api/applications/{{app_id}}/integrations/http",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"integration\": {\n    \"applicationId\": \"{{app_id}}\",\n    \"encoding\": \"JSON\",\n    \"eventEndpointUrl\": \"http://web:8000/api/webhook/\",\n    \"headers\": {}\n  }\n}"
+            },
+            "description": "ChirpStack llama al webhook por la red de Docker (web:8000) y agrega ?event=up, ?event=join, etc."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.6 Gateway simulado",
+          "request": {
+            "method": "POST",
+            "url": "{{cs_url}}/api/gateways",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"gateway\": {\n    \"gatewayId\": \"0016c001ff10a235\",\n    \"name\": \"gateway-simulado\",\n    \"tenantId\": \"{{tenant_id}}\",\n    \"description\": \"Gateway virtual del simulador\",\n    \"statsInterval\": 30,\n    \"location\": {\n      \"latitude\": 22.7758,\n      \"longitude\": -102.5714,\n      \"altitude\": 2400\n    }\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.7 Dispositivo simulado",
+          "request": {
+            "method": "POST",
+            "url": "{{cs_url}}/api/devices",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"devEui\": \"{{sim_dev_eui}}\",\n    \"name\": \"nodo-simulado-01\",\n    \"applicationId\": \"{{app_id}}\",\n    \"deviceProfileId\": \"{{perfil_sim_id}}\",\n    \"joinEui\": \"0000000000000000\"\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.8 Llave del dispositivo simulado",
+          "request": {
+            "method": "POST",
+            "url": "{{cs_url}}/api/devices/{{sim_dev_eui}}/keys",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceKeys\": {\n    \"nwkKey\": \"{{sim_app_key}}\",\n    \"appKey\": \"00000000000000000000000000000000\"\n  }\n}"
+            },
+            "description": "En LoRaWAN 1.0.x ChirpStack guarda el AppKey en el campo nwkKey."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.9 Registrar nodo Heltec real",
+          "request": {
+            "method": "POST",
+            "url": "{{cs_url}}/api/devices",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device\": {\n    \"devEui\": \"{{nodo_real_dev_eui}}\",\n    \"name\": \"heltec-v4-01\",\n    \"applicationId\": \"{{app_id}}\",\n    \"deviceProfileId\": \"{{perfil_real_id}}\",\n    \"joinEui\": \"0000000000000000\"\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.10 Llaves del nodo Heltec real",
+          "request": {
+            "method": "POST",
+            "url": "{{cs_url}}/api/devices/{{nodo_real_dev_eui}}/keys",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceKeys\": {\n    \"nwkKey\": \"{{nodo_real_nwk_key}}\",\n    \"appKey\": \"{{nodo_real_app_key}}\"\n  }\n}"
+            },
+            "description": "Llena nodo_real_app_key y nodo_real_nwk_key (valor actual, no el inicial) con las llaves de EcoGuard-Node/include/lorawan_config.h. Así no quedan guardadas en el repositorio."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.11 Dispositivos de la aplicación",
+          "request": {
+            "method": "GET",
+            "url": "{{cs_url}}/api/devices?applicationId={{app_id}}&limit=20",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Simulador: nodo → ChirpStack → webhook",
+      "description": "El simulador (contenedor simulador-lorawan) actúa como gateway + nodo: arma la misma trama que el firmware, hace el join OTAA, la cifra y se la entrega a ChirpStack por el Gateway Bridge. ChirpStack la decodifica con codec.js y la manda al webhook. El primer envío hace el join automáticamente.",
+      "item": [
+        {
+          "name": "4.1 SOS con GPS (abre incidente)",
+          "request": {
+            "method": "POST",
+            "url": "{{sim_url}}/uplink",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"sos\": true,\n  \"lat\": 22.7758,\n  \"lon\": -102.5714,\n  \"battery_mv\": 3850\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('La central confirmó (ACK)', () => pm.expect(pm.response.json().ack).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.2 Nueva posición (misma emergencia)",
+          "request": {
+            "method": "POST",
+            "url": "{{sim_url}}/uplink",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"sos\": true,\n  \"lat\": 22.7765,\n  \"lon\": -102.572,\n  \"battery_mv\": 3840\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('La central confirmó (ACK)', () => pm.expect(pm.response.json().ack).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.3 SOS sin GPS",
+          "request": {
+            "method": "POST",
+            "url": "{{sim_url}}/uplink",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"sos\": true,\n  \"battery_mv\": 3830\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('La central confirmó (ACK)', () => pm.expect(pm.response.json().ack).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.4 Cancelación del visitante",
+          "request": {
+            "method": "POST",
+            "url": "{{sim_url}}/uplink",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"cancelado\": true,\n  \"battery_mv\": 3820\n}"
+            },
+            "description": "El backend todavía no procesa 'cancelado' (CU-12): el incidente sigue abierto."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('La central confirmó (ACK)', () => pm.expect(pm.response.json().ack).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.5 Reporte periódico (heartbeat)",
+          "request": {
+            "method": "POST",
+            "url": "{{sim_url}}/uplink",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"battery_mv\": 3810\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Sin confirmar, como el firmware', () => pm.expect(pm.response.json().confirmada).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.6 Forzar un nuevo join",
+          "request": {
+            "method": "POST",
+            "url": "{{sim_url}}/join",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\"\n}"
+            },
+            "description": "Útil para ver un Join Request / Join Accept en ChirpStack (dispositivo → LoRaWAN frames)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.7 Estado del simulador",
+          "request": {
+            "method": "GET",
+            "url": "{{sim_url}}/",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
