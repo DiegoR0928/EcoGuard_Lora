@@ -68,6 +68,14 @@
     {
       "key": "nodo_real_nwk_key",
       "value": ""
+    },
+    {
+      "key": "id_incidente",
+      "value": ""
+    },
+    {
+      "key": "webhook_token",
+      "value": ""
     }
   ],
   "item": [
@@ -107,12 +115,17 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{webhook_token}}",
+                "type": "text"
               }
             ],
             "url": "{{base_url}}/api/webhook/",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"time\": \"{{$isoTimestamp}}\",\n  \"deviceInfo\": {\n    \"devEui\": \"{{dev_eui}}\",\n    \"deviceName\": \"Heltec-04\"\n  },\n  \"fCnt\": {{fcnt}},\n  \"object\": {\n    \"latitude\": 22.7758,\n    \"longitude\": -102.5714,\n    \"sos\": true,\n    \"battery_mv\": 3850\n  },\n  \"rxInfo\": [\n    {\n      \"gatewayId\": \"{{gateway_eui}}\",\n      \"rssi\": -97,\n      \"snr\": 7.5\n    }\n  ]\n}"
+              "raw": "{\n  \"time\": \"{{$isoTimestamp}}\",\n  \"deviceInfo\": {\n    \"devEui\": \"{{dev_eui}}\",\n    \"deviceName\": \"Heltec-04\"\n  },\n  \"fCnt\": {{fcnt}},\n  \"object\": {\n    \"latitude\": 22.77227,\n    \"longitude\": -102.64472,\n    \"sos\": true,\n    \"battery_mv\": 3850\n  },\n  \"rxInfo\": [\n    {\n      \"gatewayId\": \"{{gateway_eui}}\",\n      \"rssi\": -97,\n      \"snr\": 7.5\n    }\n  ]\n}"
             }
           }
         },
@@ -135,12 +148,17 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{webhook_token}}",
+                "type": "text"
               }
             ],
             "url": "{{base_url}}/api/webhook/",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"time\": \"{{$isoTimestamp}}\",\n  \"deviceInfo\": {\n    \"devEui\": \"{{dev_eui}}\"\n  },\n  \"fCnt\": {{fcnt}},\n  \"object\": {\n    \"latitude\": 22.7765,\n    \"longitude\": -102.5720,\n    \"sos\": false,\n    \"battery_mv\": 3840\n  },\n  \"rxInfo\": [\n    {\n      \"gatewayId\": \"{{gateway_eui}}\",\n      \"rssi\": -101,\n      \"snr\": 5.25\n    }\n  ]\n}"
+              "raw": "{\n  \"time\": \"{{$isoTimestamp}}\",\n  \"deviceInfo\": {\n    \"devEui\": \"{{dev_eui}}\"\n  },\n  \"fCnt\": {{fcnt}},\n  \"object\": {\n    \"latitude\": 22.77146,\n    \"longitude\": -102.6438,\n    \"sos\": false,\n    \"battery_mv\": 3840\n  },\n  \"rxInfo\": [\n    {\n      \"gatewayId\": \"{{gateway_eui}}\",\n      \"rssi\": -101,\n      \"snr\": 5.25\n    }\n  ]\n}"
             }
           }
         },
@@ -163,6 +181,11 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{webhook_token}}",
+                "type": "text"
               }
             ],
             "url": "{{base_url}}/api/webhook/",
@@ -191,6 +214,11 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{webhook_token}}",
+                "type": "text"
               }
             ],
             "url": "{{base_url}}/api/webhook/?event=join",
@@ -219,12 +247,50 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{webhook_token}}",
+                "type": "text"
               }
             ],
             "url": "{{base_url}}/api/webhook/",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"object\": {\n    \"latitude\": 22.7758,\n    \"longitude\": -102.5714,\n    \"sos\": true\n  }\n}"
+              "raw": "{\n  \"object\": {\n    \"latitude\": 22.77227,\n    \"longitude\": -102.64472,\n    \"sos\": true\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "1.6 Cancelación del visitante (cierra el incidente)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{webhook_token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/api/webhook/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"time\": \"{{$isoTimestamp}}\",\n  \"deviceInfo\": {\n    \"devEui\": \"{{dev_eui}}\"\n  },\n  \"fCnt\": {{fcnt}},\n  \"object\": {\n    \"sos\": false,\n    \"cancelado\": true,\n    \"battery_mv\": 3820\n  },\n  \"rxInfo\": [\n    {\n      \"gatewayId\": \"{{gateway_eui}}\",\n      \"rssi\": -101,\n      \"snr\": 5.25\n    }\n  ]\n}"
             }
           }
         }
@@ -242,15 +308,180 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('Devuelve una lista', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                  "pm.test('Devuelve una lista', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "const activos = pm.response.json();",
+                  "pm.collectionVariables.set('id_incidente', activos.length ? activos[0].id_incidente : '');"
                 ]
               }
             }
           ],
           "request": {
             "method": "GET",
-            "url": "{{base_url}}/api/incidentes/activos/"
+            "url": "{{base_url}}/api/incidentes/activos/",
+            "header": []
           }
+        },
+        {
+          "name": "Dispositivos",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/dispositivos/",
+            "header": [],
+            "description": "Nodos registrados, con batería, último contacto y si tienen una emergencia abierta (CU-05)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar dispositivo",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/dispositivos/",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dev_eui\": \"A1B2C3D4E5F60008\",\n  \"nombre\": \"Heltec-08\"\n}"
+            },
+            "description": "CU-06. Responde 400 si el DevEUI no tiene 16 dígitos hex o ya está registrado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Al repetir la carpeta el nodo ya existe: el backend lo rechaza como duplicado",
+                  "pm.test('Registrado, o ya existía', () => {",
+                  "    if (pm.response.code === 400) pm.expect(pm.response.json().dev_eui[0]).to.include('ya está registrado');",
+                  "    else pm.response.to.have.status(201);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inhabilitar dispositivo",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base_url}}/api/dispositivos/A1B2C3D4E5F60008/",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": false\n}"
+            },
+            "description": "CU-07. Responde 409 si el nodo tiene una emergencia abierta. Envía {\"activo\": true} para volver a habilitarlo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Marcar incidente como resuelto",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/incidentes/{{id_incidente}}/estado/",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"RESUELTO\"\n}"
+            },
+            "description": "CU-04. Estados permitidos: EN_ATENCION, RESUELTO, FALSA_ALARMA. Antes corre \"Incidentes activos\" para tomar el id_incidente."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Sin incidentes activos no hay nada que resolver: corre antes un SOS (carpeta 1 o 4)",
+                  "if (!pm.collectionVariables.get('id_incidente')) pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('id_incidente', '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Historial de incidentes",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/incidentes/historial/",
+            "header": [],
+            "description": "Incidentes cerrados, del más reciente al más antiguo (CU-08)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ruta piloto",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/ruta-piloto/",
+            "header": [],
+            "description": "GeoJSON con el gateway, la zona del campus y los puntos de control."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -418,7 +649,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"gateway\": {\n    \"gatewayId\": \"0016c001ff10a235\",\n    \"name\": \"gateway-simulado\",\n    \"tenantId\": \"{{tenant_id}}\",\n    \"description\": \"Gateway virtual del simulador\",\n    \"statsInterval\": 30,\n    \"location\": {\n      \"latitude\": 22.7758,\n      \"longitude\": -102.5714,\n      \"altitude\": 2400\n    }\n  }\n}"
+              "raw": "{\n  \"gateway\": {\n    \"gatewayId\": \"0016c001ff10a235\",\n    \"name\": \"gateway-simulado\",\n    \"tenantId\": \"{{tenant_id}}\",\n    \"description\": \"Gateway virtual del simulador\",\n    \"statsInterval\": 30,\n    \"location\": {\n      \"latitude\": 22.773256,\n      \"longitude\": -102.642665,\n      \"altitude\": 2400\n    }\n  }\n}"
             }
           },
           "event": [
@@ -585,7 +816,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"sos\": true,\n  \"lat\": 22.7758,\n  \"lon\": -102.5714,\n  \"battery_mv\": 3850\n}"
+              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"sos\": true,\n  \"lat\": 22.77227,\n  \"lon\": -102.64472,\n  \"battery_mv\": 3850\n}"
             }
           },
           "event": [
@@ -614,7 +845,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"sos\": true,\n  \"lat\": 22.7765,\n  \"lon\": -102.572,\n  \"battery_mv\": 3840\n}"
+              "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"sos\": true,\n  \"lat\": 22.77146,\n  \"lon\": -102.6438,\n  \"battery_mv\": 3840\n}"
             }
           },
           "event": [
@@ -674,7 +905,7 @@
               "mode": "raw",
               "raw": "{\n  \"dev_eui\": \"{{sim_dev_eui}}\",\n  \"app_key\": \"{{sim_app_key}}\",\n  \"cancelado\": true,\n  \"battery_mv\": 3820\n}"
             },
-            "description": "El backend todavía no procesa 'cancelado' (CU-12): el incidente sigue abierto."
+            "description": "Cierra el incidente abierto del nodo con estado CANCELADO (CU-12). Revisa el incidente en el admin de Django."
           },
           "event": [
             {

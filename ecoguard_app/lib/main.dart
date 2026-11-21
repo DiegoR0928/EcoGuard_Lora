@@ -1,325 +1,263 @@
+/// @brief Punto de entrada de la app del visitante: tema, avisos y elección de la pantalla según la fase.
+library;
+
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'dart:ui';
 
+import 'pantallas/emparejamiento.dart';
+import 'pantallas/encabezado.dart';
+import 'pantallas/menu_simulacion.dart';
+import 'pantallas/monitoreo.dart';
+import 'pantallas/sos_activo.dart';
+import 'servicios/enlace_nodo.dart';
+import 'servicios/simulacion.dart';
+import 'servicios/ubicacion.dart';
+import 'tema.dart';
+import 'visitante.dart';
+
+/// @brief Arranca la app.
+///
+/// Usa el modo simulación (nodo y GPS virtuales) con --dart-define=SIMULACION=true, y siempre fuera
+/// de Android e iOS, donde no hay Bluetooth con el nodo (Windows, navegador).
 void main() {
-  runApp(const EcoGuardApp());
+  final simular = const bool.fromEnvironment('SIMULACION') ||
+      kIsWeb ||
+      !(defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+  runApp(EcoGuardApp(simulacion: simular ? Simulacion() : null));
 }
 
-class EcoGuardApp extends StatelessWidget {
-  const EcoGuardApp({super.key});
+/// @brief Widget raíz de la app.
+class EcoGuardApp extends StatefulWidget {
+  /// @brief Crea la app.
+  /// @param key Clave del widget.
+  /// @param visitante Estado a usar; las pruebas inyectan uno con un nodo y un GPS simulados. Si es
+  ///        null, la app crea el suyo con el Bluetooth y el GPS reales o los de simulacion.
+  /// @param simulacion Nodo y GPS simulados; null con hardware real.
+  const EcoGuardApp({super.key, this.visitante, this.simulacion});
 
+  /// Estado inyectado por las pruebas; null en uso normal.
+  final Visitante? visitante;
+  /// Nodo y GPS simulados; null con hardware real.
+  final Simulacion? simulacion;
+
+  /// @brief Crea el estado de la app.
+  /// @return El estado, que guarda al visitante y muestra sus avisos.
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'EcoGuard Visitante',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0F172A), // Slate 900
-        fontFamily: 'Segoe UI',
-      ),
-      home: const PantallaVisitante(),
-    );
-  }
+  State<EcoGuardApp> createState() => _EcoGuardAppState();
 }
 
-class PantallaVisitante extends StatefulWidget {
-  const PantallaVisitante({super.key});
+/// @brief Estado de la app: crea al visitante, muestra sus avisos y dibuja la pantalla principal.
+class _EcoGuardAppState extends State<EcoGuardApp> {
+  /// Estado del visitante: el inyectado o uno nuevo con el enlace y el GPS reales o simulados.
+  late final Visitante _visitante = widget.visitante ??
+      Visitante(widget.simulacion?.enlace ?? EnlaceBluetooth(), widget.simulacion?.ubicacion ?? UbicacionGps());
+  /// Acceso al ScaffoldMessenger para mostrar los avisos como SnackBar.
+  final _mensajero = GlobalKey<ScaffoldMessengerState>();
+  /// Suscripción a los avisos del visitante.
+  late final StreamSubscription<Aviso> _avisos;
 
-  @override
-  State<PantallaVisitante> createState() => _PantallaVisitanteState();
-}
+  /// Color de fondo de cada tipo de aviso; legibles sobre fondo claro y oscuro.
+  static const _colorAviso = {
+    TipoAviso.exito: Color(0xFF1E6B3A),
+    TipoAviso.error: Color(0xFFB3261E),
+    TipoAviso.informacion: Color(0xFF37474F),
+  };
 
-class _PantallaVisitanteState extends State<PantallaVisitante> with SingleTickerProviderStateMixin {
-  bool nodoConectado = false;
-  bool isSosActive = false;
-  int bateriaNodo = 85; // Cambia este valor a 15 para probar la alerta de batería baja
+  /// Ícono de cada tipo de aviso.
+  static const _iconoAviso = {
+    TipoAviso.exito: Icons.check_circle_outline_rounded,
+    TipoAviso.error: Icons.error_outline_rounded,
+    TipoAviso.informacion: Icons.info_outline_rounded,
+  };
 
-  late AnimationController _pulseController;
-  late Animation<double> _pulseAnimation;
-
+  /// @brief Se suscribe a los avisos del visitante para mostrarlos como SnackBar (6 s los errores, 4 s el resto).
   @override
   void initState() {
     super.initState();
-    // Animación continua para el botón SOS
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
-    
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.15).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
+    _avisos = _visitante.avisos.listen((aviso) {
+      _mensajero.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(_iconoAviso[aviso.tipo], color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(aviso.texto, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
+                ),
+              ],
+            ),
+            backgroundColor: _colorAviso[aviso.tipo],
+            duration: Duration(seconds: aviso.tipo == TipoAviso.error ? 6 : 4),
+          ),
+        );
+    });
   }
 
+  /// @brief Cancela la suscripción y libera al visitante si lo creó la app.
   @override
   void dispose() {
-    _pulseController.dispose();
+    _avisos.cancel();
+    if (widget.visitante == null) _visitante.dispose();
     super.dispose();
   }
 
-  // CU-09: Emparejar nodo
-  void _buscarNodos() {
-    setState(() {
-      nodoConectado = true;
-    });
-  }
-
-  // CU-11: Emitir alerta crítica
-  void _emitirAlerta() {
-    setState(() { 
-      isSosActive = true; 
-    });
-    
-    // Mensaje exacto según SRS (CU-11)
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.white),
-            SizedBox(width: 10),
-            Text("¡Alerta enviada exitosamente!", style: TextStyle(fontWeight: FontWeight.bold)),
-          ],
-        ),
-        backgroundColor: Colors.green[700],
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-  }
-
-  // CU-12: Cancelar falsa alarma
-  void _cancelarAlerta() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("¿Desea cancelar el rescate?", style: TextStyle(color: Colors.white)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context), // FA1 de CU-12: "Regresar" sin confirmar
-            child: const Text("Regresar", style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange[700],
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: () {
-              setState(() { isSosActive = false; });
-              Navigator.pop(context); // Confirma y regresa
-            },
-            child: const Text("Confirmar", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
+  /// @brief Construye la app.
+  /// @param context Contexto del widget.
+  /// @return El widget de la app.
   @override
   Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'EcoGuard',
+      debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: _mensajero,
+      theme: temaEcoGuard(Brightness.light),
+      darkTheme: temaEcoGuard(Brightness.dark),
+      home: ListenableBuilder(
+        listenable: _visitante,
+        builder: (context, _) => PantallaPrincipal(visitante: _visitante, simulacion: widget.simulacion),
+      ),
+    );
+  }
+}
+
+/// @brief Estructura común de la app: barra superior, encabezado de estado, pantalla de la fase y pie.
+///
+/// Elige la pantalla: emparejamiento sin nodo (CU-09), alerta durante una emergencia (CU-11 y CU-12)
+/// y monitoreo en los demás casos (CU-10 y CU-11). En emergencia la barra se vuelve roja.
+class PantallaPrincipal extends StatelessWidget {
+  /// @brief Crea la pantalla.
+  /// @param key Clave del widget.
+  /// @param visitante Estado de la app.
+  /// @param simulacion Nodo y GPS simulados; si no es null, se muestran el menú y el aviso de simulación.
+  const PantallaPrincipal({super.key, required this.visitante, this.simulacion});
+
+  /// Estado de la app.
+  final Visitante visitante;
+  /// Nodo y GPS simulados; null con hardware real.
+  final Simulacion? simulacion;
+
+  /// @brief Construye la pantalla.
+  /// @param context Contexto del widget.
+  /// @return El widget de la pantalla.
+  @override
+  Widget build(BuildContext context) {
+    final emergencia = visitante.enEmergencia;
+    final Widget contenido;
+    if (visitante.nodo == null) {
+      contenido = Emparejamiento(visitante: visitante); // CU-09
+    } else if (emergencia) {
+      contenido = SosActivo(visitante: visitante); // CU-11 y CU-12
+    } else {
+      contenido = Monitoreo(visitante: visitante); // CU-10 y CU-11
+    }
+
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isSosActive 
-                ? [const Color(0xFF450A0A), const Color(0xFF0F172A)] // Rojo de emergencia
-                : [const Color(0xFF064E3B), const Color(0xFF0F172A)], // Verde seguro
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              _buildHeader(), // CU-10: Verificar estado de hardware
-              
-              // FA1 de CU-10: Alerta de batería baja local
-              if (nodoConectado && bateriaNodo < 20)
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red[900]?.withOpacity(0.8),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.redAccent),
+      appBar: AppBar(
+        // En emergencia la barra se vuelve roja: el estado se reconoce de un vistazo
+        backgroundColor: emergencia ? rojoEmergencia : null,
+        foregroundColor: emergencia ? Colors.white : null,
+        title: Row(
+          children: [
+            const Icon(Icons.health_and_safety_outlined),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('EcoGuard', style: TextStyle(fontWeight: FontWeight.w600)),
+                  Text(
+                    emergencia ? 'Alerta en curso' : 'Asistencia al visitante',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w400),
                   ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.warning_amber_rounded, color: Colors.white),
-                      SizedBox(width: 10),
-                      Text("Batería del nodo baja", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ),
-
-              const Spacer(),
-
-              // Vistas dinámicas según el estado
-              if (!nodoConectado)
-                _buildDesconectado() // CU-09
-              else if (isSosActive)
-                _buildAlertaActiva() // CU-12
-              else
-                _buildBotonSOS(),    // CU-11
-
-              const Spacer(),
-              
-              // Etiqueta decorativa de modo offline
-              const Padding(
-                padding: EdgeInsets.only(bottom: 20),
-                child: Text("SISTEMA OFFLINE ACTIVO", style: TextStyle(color: Colors.white38, letterSpacing: 2, fontSize: 12, fontWeight: FontWeight.bold)),
-              )
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Tarjeta superior (Estado y Batería)
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.all(20.0),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withOpacity(0.1)),
+                ],
+              ),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        nodoConectado ? "Estado: Conectado" : "Nodo desconectado. Acérquese al dispositivo",
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: nodoConectado ? 16 : 13,
-                          color: nodoConectado ? Colors.tealAccent : Colors.redAccent,
-                        ),
-                      ),
-                    ],
-                  ),
+          ],
+        ),
+        actions: [if (simulacion != null) MenuSimulacion(simulacion: simulacion!)],
+        bottom: simulacion == null ? null : const _AvisoSimulacion(),
+      ),
+      body: SafeArea(
+        child: LayoutBuilder(
+          // Desplazable para pantallas pequeñas o letra grande; si cabe, el contenido queda centrado
+          builder: (context, limites) => SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            // En pantallas anchas (escritorio, tableta) se conserva el ancho de un teléfono
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: limites.maxHeight - 28, maxWidth: 480),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    EncabezadoEstado(visitante: visitante),
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 24), child: contenido),
+                    const _PiePagina(),
+                  ],
                 ),
-                if (nodoConectado)
-                  Row(
-                    children: [
-                      Text(
-                        "Batería: $bateriaNodo%",
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: bateriaNodo < 20 ? Colors.redAccent : Colors.greenAccent,
-                        ),
-                      ),
-                    ],
-                  )
-              ],
+              ),
             ),
           ),
         ),
       ),
     );
   }
+}
 
-  // Vista cuando el nodo no está emparejado
-  Widget _buildDesconectado() {
-    return Column(
+/// @brief Pie de página que recuerda que la app funciona sin internet.
+///
+/// La app no usa internet ni datos: solo Bluetooth con el nodo y el GPS del teléfono (RNF-01).
+class _PiePagina extends StatelessWidget {
+  /// @brief Crea el pie de página.
+  const _PiePagina();
+
+  /// @brief Construye el pie de página.
+  /// @param context Contexto del widget.
+  /// @return El widget del pie de página.
+  @override
+  Widget build(BuildContext context) {
+    final tema = Theme.of(context);
+    final estilo = tema.textTheme.bodySmall?.copyWith(color: tema.colorScheme.onSurfaceVariant);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(Icons.bluetooth_disabled_rounded, size: 80, color: Colors.white.withOpacity(0.2)),
-        const SizedBox(height: 30),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.bluetooth_searching, color: Colors.white),
-          label: const Text("Buscar nodos", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.teal[600],
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-          ),
-          onPressed: _buscarNodos,
-        ),
-        const SizedBox(height: 15),
-        TextButton(
-          onPressed: _buscarNodos,
-          child: const Text("Escanear de nuevo", style: TextStyle(color: Colors.tealAccent, fontSize: 16)),
-        )
+        Icon(Icons.cloud_off_outlined, size: 16, color: estilo?.color),
+        const SizedBox(width: 6),
+        Flexible(child: Text('Funciona sin conexión a internet', style: estilo)),
       ],
     );
   }
+}
 
-  // Vista principal del botón SOS
-  Widget _buildBotonSOS() {
-    return GestureDetector(
-      onLongPress: _emitirAlerta,
-      child: ScaleTransition(
-        scale: _pulseAnimation,
-        child: Container(
-          width: 260,
-          height: 260,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const RadialGradient(
-              colors: [Color(0xFFEF4444), Color(0xFF991B1B)], 
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.red.withOpacity(0.4),
-                blurRadius: 30,
-                spreadRadius: 10,
-              ),
-            ],
-            border: Border.all(color: Colors.red[300]!.withOpacity(0.5), width: 4),
-          ),
-          child: const Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.power_settings_new_rounded, size: 60, color: Colors.white),
-              SizedBox(height: 10),
-              Text(
-                "SOS",
-                style: TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.w900, letterSpacing: 4),
-              ),
-            ],
-          ),
-        ),
+/// @brief Franja ámbar bajo la barra superior en modo simulación.
+///
+/// Deja claro que nada de lo que se ve viene de un nodo real.
+class _AvisoSimulacion extends StatelessWidget implements PreferredSizeWidget {
+  /// @brief Crea la franja.
+  const _AvisoSimulacion();
+
+  /// Alto de la franja: 28 px.
+  @override
+  Size get preferredSize => const Size.fromHeight(28);
+
+  /// @brief Construye la franja.
+  /// @param context Contexto del widget.
+  /// @return El widget de la franja.
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: preferredSize.height,
+      color: const Color(0xFFFFB300),
+      alignment: Alignment.center,
+      child: const Text(
+        'MODO SIMULACIÓN · Sin nodo ni GPS reales',
+        style: TextStyle(color: Color(0xFF3E2723), fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5),
       ),
-    );
-  }
-
-  // Vista de cancelación
-  Widget _buildAlertaActiva() {
-    return Column(
-      children: [
-        ScaleTransition(
-          scale: _pulseAnimation,
-          child: const Icon(Icons.emergency_share_rounded, color: Colors.redAccent, size: 100),
-        ),
-        const SizedBox(height: 30),
-        const Text("SOS Activo", style: TextStyle(fontSize: 36, color: Colors.redAccent, fontWeight: FontWeight.bold, letterSpacing: 2)),
-        const SizedBox(height: 50),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.cancel_outlined, color: Colors.white),
-          label: const Text("Cancelar Alerta", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.orange[800],
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-            elevation: 10,
-          ),
-          onPressed: _cancelarAlerta,
-        ),
-      ],
     );
   }
 }

@@ -1,5 +1,6 @@
 # Servidor de red LoRaWAN (ChirpStack v4), basado en github.com/chirpstack/chirpstack-docker.
-# Lo incluye el docker-compose.yml de la raíz, así que todo se levanta con un solo `docker compose up`.
+# Lo incluye el docker-compose.yml de la raíz, pero solo arranca si se pide:
+#   docker compose --profile chirpstack up -d
 #
 #   Interfaz web de ChirpStack  → http://localhost:8080  (usuario admin / admin)
 #   API REST (Postman)          → http://localhost:8090
@@ -10,6 +11,7 @@
 
 services:
   chirpstack:
+    profiles: ["chirpstack"]
     image: chirpstack/chirpstack:4
     command: -c /etc/chirpstack
     restart: unless-stopped
@@ -27,6 +29,7 @@ services:
       - "8080:8080"
 
   chirpstack-gateway-bridge:
+    profiles: ["chirpstack"]
     image: chirpstack/chirpstack-gateway-bridge:4
     restart: unless-stopped
     ports:
@@ -41,6 +44,7 @@ services:
       - mosquitto
 
   chirpstack-rest-api:
+    profiles: ["chirpstack"]
     image: chirpstack/chirpstack-rest-api:4
     restart: unless-stopped
     command: --server chirpstack:8080 --bind 0.0.0.0:8090 --insecure
@@ -50,6 +54,7 @@ services:
       - chirpstack
 
   chirpstack-postgres:
+    profiles: ["chirpstack"]
     image: postgres:14-alpine
     restart: unless-stopped
     volumes:
@@ -61,6 +66,7 @@ services:
       - POSTGRES_DB=chirpstack
 
   chirpstack-redis:
+    profiles: ["chirpstack"]
     image: redis:7-alpine
     restart: unless-stopped
     command: redis-server --save 300 1 --save 60 100 --appendonly no
@@ -68,6 +74,7 @@ services:
       - chirpstack_redis_data:/data
 
   mosquitto:
+    profiles: ["chirpstack"]
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
@@ -77,6 +84,7 @@ services:
 
   # Gateway y nodo virtuales para probar sin hardware (ver simulador/simulador.py)
   simulador-lorawan:
+    profiles: ["chirpstack"]
     build: ./simulador
     restart: unless-stopped
     environment:

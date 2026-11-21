@@ -1,0 +1,18 @@
+% Símbolos que usan los filtros de Dart y TypeScript (dart_a_doxygen.py y ts_a_doxygen.mjs).
+%
+% Doxygen descarta | ? y las llaves en los tipos de las variables, así que los filtros escriben en su
+% lugar caracteres Unicode equivalentes. Esta hoja, que el Doxyfile carga con LATEX_EXTRA_STYLESHEET,
+% hace que pdflatex los muestre como los caracteres originales.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{simbolos_unicode}[2026/11/16 Simbolos de los filtros de Doxygen de EcoGuard]
+
+\RequirePackage{newunicodechar}
+\newunicodechar{∣}{\textbar}
+\newunicodechar{？}{?}
+\newunicodechar{｛}{\{}
+\newunicodechar{｝}{\}}
+\newunicodechar{；}{;}
+\newunicodechar{，}{,}
+\newunicodechar{（}{(}
+\newunicodechar{）}{)}
+\newunicodechar{⇒}{\ensuremath{\Rightarrow}}

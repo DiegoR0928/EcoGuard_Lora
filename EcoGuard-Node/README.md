@@ -40,7 +40,7 @@ Los botones Build/Upload sin elegir entorno siguen compilando solo el firmware r
 
 - Mientras el SOS está activo **todas** las tramas llevan `sos=1`: si la primera se pierde, cualquiera de las siguientes abre el incidente.
 - El SOS sigue activo aunque el celular se desconecte; el nodo sigue enviando la última posición mientras tenga menos de 5 min.
-- Clic corto en el botón PRG: muestra el estado. Mantenerlo 3 s: apaga (deep sleep). Al encender de nuevo recupera la sesión LoRaWAN sin repetir el join.
+- Botón PRG: mantenerlo 3 s emite el SOS (sin coordenadas si el celular no mandó una posición en los últimos 5 min). Tres clics seguidos cancelan la alerta o, si no hay ninguna, apagan el nodo (deep sleep). Un clic muestra el estado. Al encender de nuevo recupera la sesión LoRaWAN sin repetir el join.
 
 ## Protocolo Bluetooth (app ↔ nodo)
 

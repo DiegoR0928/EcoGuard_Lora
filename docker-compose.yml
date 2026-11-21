@@ -1,6 +1,8 @@
 # docker-compose.yml (en la raíz)
 
-# Servidor de red LoRaWAN (ChirpStack) y su simulador: ver chirpstack/docker-compose.yml
+# El servidor de red es el ChirpStack de la Raspberry Pi del gateway, que entrega las tramas al
+# webhook de este backend. Opcionales: ChirpStack local con el simulador (--profile chirpstack) y
+# The Things Network (--profile ttn)
 include:
   - chirpstack/docker-compose.yml
 
@@ -24,12 +26,33 @@ services:
   web:
     build: ./backend   
     volumes:
-      - ./backend:/app 
+      - ./backend:/app
+      - ./pruebas:/pruebas:ro   # ruta_piloto.geojson para `manage.py cargar_ruta_piloto`
     ports:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgis://postgres:postgres@db:5432/ecoguard
       - CHANNEL_LAYERS_REDIS_URL=redis://redis:6379/1
+      - ALLOWED_HOSTS_EXTRA=${ALLOWED_HOSTS_EXTRA:-}
+      - CHIRPSTACK_TOKEN=${CHIRPSTACK_TOKEN:-}
+    depends_on:
+      - db
+      - redis
+
+  # Recibe las tramas de The Things Network por MQTT (opcional). Sus datos van en .env (ver .env.example)
+  ttn:
+    profiles: ["ttn"]
+    build: ./backend
+    command: python manage.py escuchar_ttn
+    restart: on-failure:3
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgis://postgres:postgres@db:5432/ecoguard
+      - CHANNEL_LAYERS_REDIS_URL=redis://redis:6379/1
+      - TTN_HOST=${TTN_HOST:-nam1.cloud.thethings.network}
+      - TTN_USUARIO=${TTN_USUARIO:-}
+      - TTN_API_KEY=${TTN_API_KEY:-}
     depends_on:
       - db
       - redis

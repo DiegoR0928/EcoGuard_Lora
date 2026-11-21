@@ -7,7 +7,11 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Ecoguard App</string>
+	<string>EcoGuard</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>EcoGuard se conecta por Bluetooth con el nodo de rescate que le entregaron en el parque.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Su ubicación se envía con la alerta SOS para que los vigilantes sepan dónde está.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

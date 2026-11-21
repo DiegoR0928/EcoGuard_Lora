@@ -1,0 +1,5 @@
+# Credenciales locales (API key de The Things Network)
+.env
+
+# Documentación generada por Doxygen (docs/generar_documentacion.bat)
+docs/doxygen/

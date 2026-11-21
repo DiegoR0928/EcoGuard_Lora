@@ -1,3 +1,42 @@
+/**
+ * @file main.cpp
+ * @brief Firmware del nodo EcoGuard: Heltec WiFi LoRa 32 V4 (ESP32-S3 + SX1262).
+ *
+ * El nodo lo lleva el visitante durante su recorrido. Recibe la alerta del teléfono por Bluetooth
+ * Low Energy (BLE) o del botón PRG y la transmite por LoRaWAN al gateway del parque, que la entrega
+ * al backend a través de ChirpStack.
+ *
+ * @par Flujo general
+ * -# setup() configura energía, pantalla, radio, credenciales LoRaWAN y el servidor BLE.
+ * -# loop() se une a la red con OTAA (reintenta cada 60 s), atiende el botón y los comandos del
+ *    teléfono, y envía tramas: cada 30 s mientras hay una alerta activa o una cancelación pendiente,
+ *    y cada 10 min como reporte de estado.
+ * -# Tres clics sin alerta activa apagan el nodo (deep sleep); la sesión LoRaWAN se conserva en la
+ *    memoria RTC y el botón lo vuelve a encender.
+ *
+ * @par Protocolo BLE (servicio SERVICE_UUID)
+ * - CHARACTERISTIC_UUID (escritura, teléfono a nodo): comandos.
+ *   - CMD_SOS y CMD_POSICION: 10 bytes, [comando][banderas][lat int32][lon int32], little-endian,
+ *     coordenadas en grados × 1 000 000. Bit 0 de banderas: el teléfono tiene posición GPS.
+ *   - CMD_CANCELAR: 1 byte.
+ * - ESTADO_UUID (lectura y notificación, nodo a teléfono): 3 bytes, [batería mV uint16][estado].
+ *   Bits de estado: 0x01 unido a la red, 0x02 alerta activa, 0x04 la central confirmó la alerta.
+ *
+ * @par Trama LoRaWAN (puerto PUERTO_LORAWAN)
+ * [banderas][batería mV uint16][lat int32][lon int32], little-endian. Banderas: 0x01 SOS,
+ * 0x02 trae posición, 0x04 cancelación. Sin posición vigente mide 3 bytes; con posición, 11.
+ * El backend la decodifica en geolocalizacion/tramas.py.
+ *
+ * @par Botón PRG
+ * - Mantenerlo PULSACION_SOS ms: emite el SOS (el mismo gesto del botón de la app, CU-11).
+ * - Tres clics: cancelan la alerta o, si no hay ninguna, apagan el nodo.
+ * - Un clic: enciende la pantalla y muestra el estado.
+ *
+ * @par Configuración
+ * Las llaves LoRaWAN van en include/lorawan_config.h (copia de lorawan_config.example.h, fuera de
+ * git). El entorno "sin_gateway" de platformio.ini define SIMULAR_LORAWAN para probar la pantalla y
+ * el Bluetooth sin red. Más detalles en EcoGuard-Node/README.md.
+ */
 #include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -9,83 +48,131 @@
 #include <Wire.h>
 #include <driver/gpio.h>
 
-// Llaves de ChirpStack. Si falta, copia include/lorawan_config.example.h como lorawan_config.h
+// Llaves LoRaWAN. Si falta, copia include/lorawan_config.example.h como lorawan_config.h
 #include "lorawan_config.h"
 
 // Protocolo BLE, formato de la trama LoRaWAN y puesta en marcha: ver README.md
 
-// --- PIN BOTÓN (Para encender/apagar y despertar pantalla) ---
-#define BOTON_PRG 0
+/**
+ * @name Botón PRG
+ * Mantenerlo 3 s emite el SOS, el mismo gesto del botón de la app (CU-11). Tres clics cancelan la
+ * alerta o, si no hay ninguna, apagan el nodo: repetir el gesto del SOS por nervios nunca la cancela.
+ */
+///@{
+#define BOTON_PRG 0  ///< GPIO del botón PRG (activo en LOW, con pull-up). También despierta al nodo del deep sleep.
+const unsigned long PULSACION_SOS = 3000;      ///< Tiempo presionado, en ms, que emite el SOS.
+const unsigned long AVISO_PULSACION = 500;     ///< A partir de aquí (ms) la pantalla pide seguir presionando.
+const unsigned long PAUSA_ENTRE_CLICS = 600;   ///< Una pausa mayor (ms) termina la serie de clics.
+const unsigned long REBOTE_BOTON = 30;         ///< Espera antirrebote tras cada cambio del botón, en ms.
 
-// --- PINES DE ENERGÍA Y BATERÍA (Heltec V4) ---
-#define VEXT 36
-#define BATTERY_PIN 1
-#define ADC_CTRL 37                        // En la V4 el medidor se activa en HIGH (en la V3 era LOW)
-#define ADC_MULTIPLICADOR (4.9f * 1.045f)  // Divisor 390k/100k, con la corrección que usa Meshtastic
+/// Gesto reconocido por leerGestoBoton().
+enum GestoBoton {
+    GESTO_CLIC,         ///< Uno o dos clics: muestra el estado.
+    GESTO_TRIPLE_CLIC,  ///< Tres o más clics: cancela la alerta o apaga el nodo.
+    GESTO_MANTENIDO     ///< Presionado PULSACION_SOS ms: emite el SOS.
+};
+/// Verdadero tras un GESTO_MANTENIDO hasta que se suelta el botón, para no contarlo como otro gesto.
+bool esperarSoltarBoton = false;
+///@}
 
-// --- PINES LORA ---
-#define RADIO_NSS    8
-#define RADIO_DIO1   14
-#define RADIO_NRST   12
-#define RADIO_BUSY   13
-#define RADIO_TCXO_V 1.8
+/** @name Pines de energía y batería (Heltec V4) */
+///@{
+#define VEXT 36                            ///< Controla la alimentación de la pantalla y periféricos (LOW = encendido).
+#define BATTERY_PIN 1                      ///< Entrada analógica del divisor de voltaje de la batería.
+#define ADC_CTRL 37                        ///< Activa el divisor de la batería. En la V4 se activa en HIGH (en la V3 era LOW).
+#define ADC_MULTIPLICADOR (4.9f * 1.045f)  ///< Divisor 390k/100k, con la corrección que usa Meshtastic.
+///@}
+
+/** @name Radio LoRa SX1262 */
+///@{
+#define RADIO_NSS    8    ///< Selección de chip SPI del SX1262.
+#define RADIO_DIO1   14   ///< Interrupción DIO1 del SX1262 (fin de transmisión o recepción).
+#define RADIO_NRST   12   ///< Reset del SX1262.
+#define RADIO_BUSY   13   ///< Señal BUSY del SX1262.
+#define RADIO_TCXO_V 1.8  ///< Voltaje del oscilador TCXO del SX1262, en V.
+/// Radio LoRa (RadioLib).
 SX1262 radio = new Module(RADIO_NSS, RADIO_DIO1, RADIO_NRST, RADIO_BUSY);
+///@}
 
-// --- AMPLIFICADOR DE RADIO (FEM) DE LA V4 ---
-// La V4 amplifica la salida del SX1262 hasta ~28 dBm. Si el FEM no se enciende,
-// la radio reporta envíos exitosos pero la señal casi no sale de la antena.
-#define FEM_POWER    7   // LDO que alimenta el FEM
-#define FEM_CSD      2   // Habilita el chip (HIGH) en ambas revisiones
-#define FEM_CPS_V4_2 46  // V4.2 (GC1109): HIGH = amplificador completo al transmitir
-#define FEM_CTX_V4_3 5   // V4.3 (KCT8103L): HIGH al transmitir, LOW al recibir (LNA)
+/**
+ * @name Amplificador de radio (FEM) de la V4
+ * La V4 amplifica la salida del SX1262 hasta ~28 dBm. Si el FEM no se enciende, la radio reporta
+ * envíos exitosos pero la señal casi no sale de la antena. Hay dos revisiones de placa con chips
+ * distintos; encenderFEM() detecta cuál es.
+ */
+///@{
+#define FEM_POWER    7   ///< LDO que alimenta el FEM.
+#define FEM_CSD      2   ///< Habilita el chip (HIGH) en ambas revisiones.
+#define FEM_CPS_V4_2 46  ///< V4.2 (GC1109): HIGH = amplificador completo al transmitir.
+#define FEM_CTX_V4_3 5   ///< V4.3 (KCT8103L): HIGH al transmitir, LOW al recibir (LNA).
 
-enum TipoFEM { FEM_GC1109, FEM_KCT8103L };
+/// Chip FEM de la placa.
+enum TipoFEM {
+    FEM_GC1109,    ///< Heltec V4.2.
+    FEM_KCT8103L   ///< Heltec V4.3.
+};
+/// Revisión detectada por encenderFEM().
 TipoFEM tipoFEM;
 
-// El pin de cada revisión se conmuta igual: HIGH al transmitir y LOW el resto del tiempo.
-// La selección de camino TX/RX la hace DIO2 del SX1262 automáticamente.
+/// Pines que RadioLib conmuta según el modo de la radio; solo se usa el primero (el del FEM).
+/// El pin de cada revisión se conmuta igual: HIGH al transmitir y LOW el resto del tiempo.
+/// La selección de camino TX/RX la hace DIO2 del SX1262 automáticamente.
 uint32_t pinesFEM[Module::RFSWITCH_MAX_PINS];
+/// Nivel del pin del FEM en cada modo de la radio: HIGH solo al transmitir.
 static const Module::RfSwitchMode_t tablaFEM[] = {
     { Module::MODE_IDLE, { LOW } },
     { Module::MODE_RX,   { LOW } },
     { Module::MODE_TX,   { HIGH } },
     END_OF_MODE_TABLE,
 };
+///@}
 
-// --- PINES PANTALLA OLED ---
-#define OLED_SDA 17
-#define OLED_SCL 18
-#define OLED_RST 21
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA);
+/** @name Pantalla OLED SSD1306 (128 × 64, I2C) */
+///@{
+#define OLED_SDA 17  ///< Datos I2C de la pantalla.
+#define OLED_SCL 18  ///< Reloj I2C de la pantalla.
+#define OLED_RST 21  ///< Reset de la pantalla.
+/// Controlador de la pantalla (U8g2, búfer completo). Se inicializa con llaves para que Doxygen no
+/// confunda la definición con la declaración de una función.
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2{U8G2_R0, OLED_RST, OLED_SCL, OLED_SDA};
+///@}
 
-// --- UUIDs BLUETOOTH ---
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"  // Celular → nodo (comandos)
-#define ESTADO_UUID         "d2b0f5a1-7c3e-4b8a-9f61-3a5e8c1d4e72"  // Nodo → celular (notificaciones)
+/** @name Bluetooth Low Energy */
+///@{
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"  ///< Servicio BLE de EcoGuard; la app filtra el escaneo por él.
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"  ///< Celular → nodo (comandos).
+#define ESTADO_UUID         "d2b0f5a1-7c3e-4b8a-9f61-3a5e8c1d4e72"  ///< Nodo → celular (notificaciones).
 
-#define CMD_SOS      0x01
-#define CMD_POSICION 0x02
-#define CMD_CANCELAR 0x03
+#define CMD_SOS      0x01  ///< Comando BLE: alerta con la posición del teléfono (10 bytes).
+#define CMD_POSICION 0x02  ///< Comando BLE: solo actualiza la posición (10 bytes).
+#define CMD_CANCELAR 0x03  ///< Comando BLE: cancela la alerta activa (1 byte).
+///@}
 
-// --- LORAWAN ---
-const LoRaWANBand_t REGION = US915;
-const uint8_t PUERTO_LORAWAN = 1;
-// DR1 = SF9. El nodo se mueve con el visitante, así que se fija el datarate en lugar de usar ADR
+/** @name LoRaWAN */
+///@{
+const LoRaWANBand_t REGION = US915;  ///< Plan de frecuencias (Norteamérica, 902-928 MHz).
+const uint8_t PUERTO_LORAWAN = 1;    ///< Puerto (FPort) de las tramas de EcoGuard; el backend ignora los demás.
+/// Datarate fijo: DR1 = SF9 a 125 kHz. El nodo se mueve con el visitante, así que se fija el
+/// datarate en lugar de usar ADR, que lo ajustaría según condiciones de radio que cambian a cada paso.
 const uint8_t DATARATE = 1;
 
-const unsigned long INTERVALO_SOS = 30UL * 1000;             // Reenvío mientras la alerta está activa
-const unsigned long INTERVALO_REPORTE = 10UL * 60 * 1000;    // Reporte periódico para el monitoreo de salud (CU-5)
-const unsigned long REINTENTO_JOIN = 60UL * 1000;
-const unsigned long VIGENCIA_POSICION = 5UL * 60 * 1000;     // Una posición más vieja ya no se envía
-const uint8_t MAX_INTENTOS_CANCELACION = 3;
+const unsigned long INTERVALO_SOS = 30UL * 1000;             ///< Reenvío mientras la alerta está activa, en ms.
+const unsigned long INTERVALO_REPORTE = 10UL * 60 * 1000;    ///< Reporte periódico para el monitoreo de salud (CU-5), en ms.
+const unsigned long REINTENTO_JOIN = 60UL * 1000;            ///< Espera entre intentos de unirse a la red, en ms.
+const unsigned long VIGENCIA_POSICION = 5UL * 60 * 1000;     ///< Una posición más vieja (ms) ya no se envía.
+const uint8_t MAX_INTENTOS_CANCELACION = 3;                  ///< Envíos de la cancelación sin ACK antes de darla por terminada.
 
-uint64_t joinEUI = LORAWAN_JOIN_EUI;
-uint64_t devEUI = 0;
-uint8_t appKey[] = { LORAWAN_APP_KEY };
-uint8_t nwkKey[] = { LORAWAN_NWK_KEY };
-LoRaWANNode node(&radio, &REGION, LORAWAN_SUB_BANDA);
+uint64_t joinEUI = LORAWAN_JOIN_EUI;    ///< JoinEUI (antes AppEUI), de lorawan_config.h.
+uint64_t devEUI = 0;                    ///< DevEUI: el de lorawan_config.h o, si no está definido, devEuiDesdeMac().
+uint8_t appKey[] = { LORAWAN_APP_KEY }; ///< AppKey (raíz de la AppSKey, que cifra la carga útil), de lorawan_config.h.
+uint8_t nwkKey[] = { LORAWAN_NWK_KEY }; ///< NwkKey (raíz de las llaves de red de LoRaWAN 1.1), de lorawan_config.h.
+/// Nodo LoRaWAN de RadioLib, en la sub-banda LORAWAN_SUB_BANDA. Se inicializa con llaves por la
+/// misma razón que #u8g2.
+LoRaWANNode node{&radio, &REGION, LORAWAN_SUB_BANDA};
+/// Memoria flash no volátil (espacio "lorawan"). Guarda los nonces del join para no repetir el DevNonce.
 Preferences almacen;
-char textoDevEUI[17];
+char textoDevEUI[17];  ///< DevEUI en hexadecimal (16 dígitos y terminador) para la pantalla y el nombre BLE.
+///@}
 
 #ifdef SIMULAR_LORAWAN
 // Entorno "sin_gateway" de platformio.ini: no hay join, cada trama se imprime por serial
@@ -93,49 +180,88 @@ char textoDevEUI[17];
 const char *TEXTO_EN_RED = "Red SIMULADA";
 bool enRed() { return true; }
 #else
+/// Texto de la pantalla cuando el nodo está en la red. Con SIMULAR_LORAWAN es "Red SIMULADA".
 const char *TEXTO_EN_RED = "Red LoRaWAN OK";
+/**
+ * @brief Indica si el nodo puede transmitir.
+ *
+ * Con SIMULAR_LORAWAN (entorno "sin_gateway") siempre devuelve true: no hay join, cada trama se
+ * imprime por serial y se simula el ACK de la central.
+ * @return true si el nodo tiene una sesión LoRaWAN activa.
+ */
 bool enRed() { return node.isActivated(); }
 #endif
 
-// La sesión sobrevive al deep sleep en memoria RTC: al volver a encender no hace falta otro join
-RTC_DATA_ATTR uint8_t sesionGuardada[RADIOLIB_LORAWAN_SESSION_BUF_SIZE];
-RTC_DATA_ATTR bool haySesionGuardada = false;
+/** @name Sesión LoRaWAN en memoria RTC
+ * La sesión sobrevive al deep sleep en memoria RTC: al volver a encender no hace falta otro join.
+ */
+///@{
+RTC_DATA_ATTR uint8_t sesionGuardada[RADIOLIB_LORAWAN_SESSION_BUF_SIZE];  ///< Copia de la sesión que guarda apagarNodo().
+RTC_DATA_ATTR bool haySesionGuardada = false;                              ///< Verdadero si sesionGuardada es válida.
+///@}
 
-// --- ESTADO COMPARTIDO CON LOS CALLBACKS BLE (corren en otra tarea) ---
-portMUX_TYPE candado = portMUX_INITIALIZER_UNLOCKED;
-volatile bool pedidoSOS = false;
-volatile bool pedidoCancelar = false;
-volatile bool celularConectado = false;
-volatile bool cambioConexion = false;
-int32_t latE6 = 0;   // Grados × 1 000 000
-int32_t lonE6 = 0;
-unsigned long posicionRecibidaEn = 0;
-bool hayPosicion = false;
+/**
+ * @name Estado compartido con los callbacks BLE
+ * Los callbacks BLE corren en otra tarea de FreeRTOS: las banderas son volatile y la posición se
+ * lee y escribe dentro de una sección crítica con #candado.
+ */
+///@{
+portMUX_TYPE candado = portMUX_INITIALIZER_UNLOCKED;  ///< Protege latE6, lonE6, posicionRecibidaEn y hayPosicion.
+volatile bool pedidoSOS = false;          ///< El teléfono o el botón pidieron un SOS; lo atiende loop().
+volatile bool pedidoCancelar = false;     ///< El teléfono o el botón pidieron cancelar; lo atiende loop().
+volatile bool celularConectado = false;   ///< Hay un teléfono conectado por BLE.
+volatile bool cambioConexion = false;     ///< Cambió la conexión BLE; loop() lo muestra en pantalla.
+int32_t latE6 = 0;   ///< Última latitud recibida del teléfono, en grados × 1 000 000.
+int32_t lonE6 = 0;   ///< Última longitud recibida del teléfono, en grados × 1 000 000.
+unsigned long posicionRecibidaEn = 0;  ///< millis() de la última posición recibida.
+bool hayPosicion = false;              ///< Verdadero si alguna vez llegó una posición.
+///@}
 
-// --- ESTADO DEL NODO ---
-bool modoSOS = false;
-bool cancelacionPendiente = false;
-uint8_t intentosCancelacion = 0;
-bool alertaConfirmada = false;  // La central respondió con ACK a alguna trama de esta alerta
-uint16_t ultimaBateriaMv = 0;
-unsigned long proximoEnvio = 0;
-unsigned long proximoIntentoJoin = 0;
-BLECharacteristic *caracteristicaEstado = nullptr;
+/** @name Estado del nodo */
+///@{
+bool modoSOS = false;               ///< Hay una alerta activa: se reenvía cada INTERVALO_SOS.
+bool cancelacionPendiente = false;  ///< Falta transmitir la cancelación de la alerta.
+uint8_t intentosCancelacion = 0;    ///< Envíos de la cancelación sin ACK.
+bool alertaConfirmada = false;      ///< La central respondió con ACK a alguna trama de esta alerta.
+uint16_t ultimaBateriaMv = 0;       ///< Última lectura de la batería, en mV.
+unsigned long proximoEnvio = 0;          ///< millis() del próximo envío de trama.
+unsigned long proximoIntentoJoin = 0;    ///< millis() del próximo intento de unirse a la red.
+BLECharacteristic *caracteristicaEstado = nullptr;  ///< Característica de estado (ESTADO_UUID) para notificar a la app.
+///@}
 
-// --- VARIABLES DE AHORRO DE ENERGÍA ---
-unsigned long tiempoUltimaAccion = 0;
-const unsigned long TIEMPO_PANTALLA_ACTIVA = 10000; // 10 segundos
-bool pantallaEncendida = true;
+/** @name Ahorro de energía */
+///@{
+unsigned long tiempoUltimaAccion = 0;                ///< millis() de la última actualización de la pantalla.
+const unsigned long TIEMPO_PANTALLA_ACTIVA = 10000;  ///< La pantalla se apaga tras 10 s sin cambios.
+bool pantallaEncendida = true;                       ///< Estado actual de la pantalla.
+///@}
 
+/**
+ * @brief Escribe un entero de 32 bits con signo en little-endian.
+ * @param destino Búfer de al menos 4 bytes.
+ * @param valor Entero a escribir.
+ */
 void escribirInt32LE(uint8_t *destino, int32_t valor) {
     for (int i = 0; i < 4; i++) destino[i] = (uint32_t)valor >> (8 * i);
 }
 
+/**
+ * @brief Lee un entero de 32 bits con signo en little-endian.
+ * @param origen Búfer de al menos 4 bytes.
+ * @return El entero leído.
+ */
 int32_t leerInt32LE(const uint8_t *origen) {
     return (int32_t)((uint32_t)origen[0] | ((uint32_t)origen[1] << 8) | ((uint32_t)origen[2] << 16) | ((uint32_t)origen[3] << 24));
 }
 
-// Voltaje de la celda en milivoltios (el SDD pide mV: la curva de descarga de una LiPo no es lineal)
+/**
+ * @brief Mide el voltaje de la celda de la batería.
+ *
+ * Activa el divisor con ADC_CTRL, promedia 8 lecturas calibradas y lo vuelve a desactivar para no
+ * gastar batería. Se reporta en mV porque el SDD lo pide así: la curva de descarga de una LiPo no
+ * es lineal.
+ * @return Voltaje de la celda en mV.
+ */
 uint16_t leerBateriaMv() {
     digitalWrite(ADC_CTRL, HIGH);
     delay(10); // Estabilizar voltaje
@@ -147,12 +273,50 @@ uint16_t leerBateriaMv() {
     return (suma / 8) * ADC_MULTIPLICADOR;
 }
 
-// Solo para la pantalla: aproximación lineal entre 3.3 V (vacía) y 4.2 V (llena)
+/**
+ * @brief Carga restante de una celda LiPo 1S, en pares {mV, %}.
+ *
+ * Es la misma curva del panel web (frontend/src/lib/formato.ts) y de la app
+ * (ecoguard_app/lib/bateria.dart), para que los tres muestren el mismo porcentaje. El 0 % está en
+ * 3.3 V, donde RNF-05 da la celda por agotada.
+ */
+const uint16_t CURVA_LIPO[][2] = {
+    {3300, 0},  {3610, 5},  {3690, 10}, {3710, 15}, {3730, 20}, {3750, 25}, {3770, 30},
+    {3790, 35}, {3800, 40}, {3820, 45}, {3840, 50}, {3850, 55}, {3870, 60}, {3910, 65},
+    {3950, 70}, {3980, 75}, {4020, 80}, {4080, 85}, {4110, 90}, {4150, 95}, {4200, 100},
+};
+
+/**
+ * @brief Convierte el voltaje de la batería en porcentaje con la curva CURVA_LIPO.
+ *
+ * Solo se usa en la pantalla: a la red viajan los mV. Interpola linealmente entre los dos puntos de
+ * la curva que rodean al voltaje.
+ * @param mv Voltaje de la celda en mV.
+ * @return Carga restante de 0 a 100 %.
+ */
 int porcentajeBateria(uint16_t mv) {
-    return constrain(map(mv, 3300, 4200, 0, 100), 0, 100);
+    const size_t puntos = sizeof(CURVA_LIPO) / sizeof(CURVA_LIPO[0]);
+    if (mv <= CURVA_LIPO[0][0]) return 0;
+    for (size_t i = 1; i < puntos; i++) {
+        if (mv <= CURVA_LIPO[i][0]) {
+            const uint16_t* bajo = CURVA_LIPO[i - 1];
+            const uint16_t* alto = CURVA_LIPO[i];
+            const float fraccion = float(mv - bajo[0]) / (alto[0] - bajo[0]);
+            return lroundf(bajo[1] + fraccion * (alto[1] - bajo[1]));
+        }
+    }
+    return 100;
 }
 
-// Función para actualizar y despertar la pantalla con barra de estado
+/**
+ * @brief Muestra tres líneas de texto en la pantalla, con una barra de estado arriba.
+ *
+ * Enciende la pantalla si estaba apagada, actualiza ultimaBateriaMv y reinicia el temporizador de
+ * apagado (TIEMPO_PANTALLA_ACTIVA). La barra de estado muestra "EcoGuard" y el porcentaje de batería.
+ * @param linea1 Primera línea (hasta 21 caracteres con la fuente de 6 × 10).
+ * @param linea2 Segunda línea.
+ * @param linea3 Tercera línea; vacía por defecto.
+ */
 void mostrarEnPantalla(const char* linea1, const char* linea2, const char* linea3 = "") {
     if (!pantallaEncendida) {
         u8g2.setPowerSave(0);
@@ -180,8 +344,14 @@ void mostrarEnPantalla(const char* linea1, const char* linea2, const char* linea
     tiempoUltimaAccion = millis();
 }
 
-// Enciende el FEM de la V4 y detecta la revisión: el pin CSD tiene pull-down interno
-// en el GC1109 (V4.2) y pull-up en el KCT8103L (V4.3). Debe llamarse antes de radio.begin()
+/**
+ * @brief Enciende el amplificador (FEM) de la V4 y detecta la revisión de la placa.
+ *
+ * El pin CSD tiene pull-down interno en el GC1109 (V4.2) y pull-up en el KCT8103L (V4.3): leyéndolo
+ * como entrada antes de manejarlo se sabe qué chip hay. Luego registra en RadioLib el pin que debe
+ * subir al transmitir (tablaFEM). Libera los pines que apagarNodo() dejó fijados.
+ * @pre Debe llamarse antes de radio.begin().
+ */
 void encenderFEM() {
     pinMode(FEM_POWER, OUTPUT);
     digitalWrite(FEM_POWER, HIGH);
@@ -201,7 +371,12 @@ void encenderFEM() {
     radio.setRfSwitchTable(pinesFEM, tablaFEM);
 }
 
-// EUI-64 derivado de la MAC del ESP32 (se inserta FFFE a la mitad): único y fijo para cada placa
+/**
+ * @brief Deriva un EUI-64 de la MAC del ESP32, insertando FFFE a la mitad.
+ *
+ * Es único y fijo para cada placa, así que sirve como DevEUI sin configurar nada.
+ * @return DevEUI de 64 bits, p. ej. la MAC AA:BB:CC:DD:EE:FF da AABBCCFFFEDDEEFF.
+ */
 uint64_t devEuiDesdeMac() {
     uint64_t mac = ESP.getEfuseMac();  // El primer byte de la MAC queda en el byte menos significativo
     uint8_t m[6];
@@ -210,7 +385,12 @@ uint64_t devEuiDesdeMac() {
            (0xFEULL << 24) | ((uint64_t)m[3] << 16) | ((uint64_t)m[4] << 8) | m[5];
 }
 
-// Notifica a la app: batería en mV y banderas de estado (ver README.md)
+/**
+ * @brief Actualiza la característica de estado y notifica a la app si está conectada.
+ *
+ * Valor de 3 bytes: batería en mV (uint16 little-endian) y banderas: 0x01 unido a la red, 0x02
+ * alerta activa, 0x04 la central confirmó la alerta.
+ */
 void publicarEstado() {
     if (!caracteristicaEstado) return;
 
@@ -223,11 +403,20 @@ void publicarEstado() {
     if (celularConectado) caracteristicaEstado->notify();
 }
 
+/**
+ * @brief Intenta unirse a la red LoRaWAN por OTAA, o restaurar la sesión guardada.
+ *
+ * Guarda los nonces en flash después de cada intento: avanzan en cada Join Request y, si no se
+ * guardan, la red rechaza el join tras reiniciar (DevNonce repetido). Al unirse desactiva ADR y fija
+ * DATARATE. Muestra el resultado en la pantalla.
+ * @note Bloquea unos segundos: espera las ventanas de recepción del Join Accept.
+ * @return true si hay sesión (nueva o restaurada); false si falló, y loop() reintenta en REINTENTO_JOIN.
+ */
 bool intentarUnirse() {
     mostrarEnPantalla("Conectando a la red", "LoRaWAN...", textoDevEUI);
     int16_t estado = node.activateOTAA();
 
-    // Los nonces avanzan en cada intento; si no se guardan, ChirpStack rechaza el join tras reiniciar
+    // Los nonces avanzan en cada intento; si no se guardan, la red rechaza el join tras reiniciar
     almacen.putBytes("nonces", node.getBufferNonces(), RADIOLIB_LORAWAN_NONCES_BUF_SIZE);
     Serial.printf("[LoRaWAN] join: %d\n", estado);
 
@@ -244,7 +433,15 @@ bool intentarUnirse() {
     return true;
 }
 
-// Arma y envía una trama. Devuelve true si la central la confirmó con ACK
+/**
+ * @brief Arma y envía una trama de EcoGuard, y espera el ACK si es una alerta.
+ *
+ * Incluye la posición solo si se recibió hace menos de VIGENCIA_POSICION. Las alertas y las
+ * cancelaciones van confirmadas: el ACK de la central es la confirmación que ve el visitante. Imprime
+ * la trama en hexadecimal por el puerto serial y actualiza la pantalla y el estado BLE.
+ * @param cancelacion true para enviar la cancelación (bandera 0x04) en lugar de la alerta o el reporte.
+ * @return true si la central confirmó la trama con ACK.
+ */
 bool enviarTrama(bool cancelacion) {
     int32_t lat, lon;
     bool conGPS;
@@ -303,6 +500,14 @@ bool enviarTrama(bool cancelacion) {
     return ack;
 }
 
+/**
+ * @brief Apaga el nodo: guarda la sesión LoRaWAN y entra en deep sleep.
+ *
+ * Copia la sesión en la memoria RTC (sesionGuardada) para no repetir el join al encender, apaga la
+ * pantalla y la radio, y fija los pines del FEM y de VEXT durante el sueño: flotando, podrían seguir
+ * consumiendo. El botón PRG despierta al nodo, que arranca de nuevo desde setup().
+ * @note No regresa.
+ */
 void apagarNodo() {
     mostrarEnPantalla("Apagando sistema...", "Hasta pronto", "");
     delay(2000);
@@ -327,8 +532,82 @@ void apagarNodo() {
     esp_deep_sleep_start();
 }
 
-// Callback BLE de Recepción de Datos
+/**
+ * @brief Sigue el botón desde que se presiona hasta reconocer el gesto.
+ *
+ * Bloquea solo mientras dura el gesto. Si el botón se mantiene, a los AVISO_PULSACION ms la
+ * pantalla pide seguir presionando (salvo con una alerta activa). Una serie de clics termina cuando
+ * pasa PAUSA_ENTRE_CLICS sin volver a presionar.
+ * @pre El botón está presionado (LOW) al llamarla.
+ * @return GESTO_MANTENIDO, GESTO_TRIPLE_CLIC (3 o más clics) o GESTO_CLIC.
+ */
+GestoBoton leerGestoBoton() {
+    uint8_t clics = 0;
+    while (true) {
+        unsigned long inicio = millis();
+        bool avisado = false;
+        while (digitalRead(BOTON_PRG) == LOW) {
+            unsigned long presionado = millis() - inicio;
+            if (presionado >= PULSACION_SOS) return GESTO_MANTENIDO;
+            if (!avisado && !modoSOS && clics == 0 && presionado >= AVISO_PULSACION) {
+                mostrarEnPantalla("Manten presionado", "para enviar SOS", "");
+                avisado = true;
+            }
+            delay(10);
+        }
+        clics++;
+        delay(REBOTE_BOTON);
+
+        unsigned long soltado = millis();
+        while (digitalRead(BOTON_PRG) == HIGH) {
+            if (millis() - soltado >= PAUSA_ENTRE_CLICS) return clics >= 3 ? GESTO_TRIPLE_CLIC : GESTO_CLIC;
+            delay(10);
+        }
+        delay(REBOTE_BOTON);
+    }
+}
+
+/**
+ * @brief Ejecuta la acción del gesto del botón.
+ *
+ * - Mantenido: pide el SOS (o, si ya hay uno, recuerda cómo cancelarlo).
+ * - Tres clics: pide la cancelación o, sin alerta activa, apaga el nodo.
+ * - Clic: muestra el estado de la alerta, de la red y el DevEUI.
+ */
+void atenderBoton() {
+    switch (leerGestoBoton()) {
+        case GESTO_MANTENIDO:
+            esperarSoltarBoton = true;  // Si sigue presionado no debe contar como otro gesto
+            if (modoSOS) mostrarEnPantalla("SOS ACTIVO", "3 clics: cancelar", "");
+            else pedidoSOS = true;
+            break;
+        case GESTO_TRIPLE_CLIC:
+            if (modoSOS) pedidoCancelar = true;
+            else apagarNodo();
+            break;
+        case GESTO_CLIC:
+            mostrarEnPantalla(modoSOS ? "SOS ACTIVO" : "Heltec Activo",
+                              enRed() ? TEXTO_EN_RED : "Sin red LoRaWAN",
+                              textoDevEUI);
+            break;
+    }
+}
+
+/**
+ * @brief Recibe los comandos que el teléfono escribe en la característica CHARACTERISTIC_UUID.
+ *
+ * Corre en la tarea de BLE, no en loop(): solo guarda la posición y levanta banderas (pedidoSOS,
+ * pedidoCancelar), y loop() hace el resto.
+ */
 class MyCallbacks: public BLECharacteristicCallbacks {
+    /**
+     * @brief Procesa un comando del teléfono.
+     *
+     * CMD_SOS y CMD_POSICION traen [comando][banderas][lat int32][lon int32]; la posición solo se
+     * guarda si el bit 0 de banderas indica que el teléfono tiene posición GPS. CMD_CANCELAR no trae
+     * datos. Los comandos incompletos o desconocidos se ignoran.
+     * @param pCharacteristic Característica escrita por el teléfono.
+     */
     void onWrite(BLECharacteristic *pCharacteristic) {
         uint8_t *datos = pCharacteristic->getData();
         size_t largo = pCharacteristic->getLength();
@@ -352,12 +631,24 @@ class MyCallbacks: public BLECharacteristicCallbacks {
     }
 };
 
-// Callback BLE de Conexión/Desconexión
+/**
+ * @brief Sigue la conexión y desconexión del teléfono por BLE.
+ */
 class ServerCallbacks: public BLEServerCallbacks {
+    /**
+     * @brief Un teléfono se conectó: lo anota para que loop() lo muestre y le publique el estado.
+     * @param pServer Servidor BLE.
+     */
     void onConnect(BLEServer* pServer) {
         celularConectado = true;
         cambioConexion = true;
     }
+    /**
+     * @brief El teléfono se desconectó: lo anota y vuelve a anunciarse para que pueda reconectarse.
+     *
+     * Una alerta activa sigue transmitiéndose aunque el teléfono se desconecte.
+     * @param pServer Servidor BLE.
+     */
     void onDisconnect(BLEServer* pServer) {
         celularConectado = false;
         cambioConexion = true;
@@ -365,6 +656,18 @@ class ServerCallbacks: public BLEServerCallbacks {
     }
 };
 
+/**
+ * @brief Arranque del nodo (también al despertar del deep sleep).
+ *
+ * -# Configura el botón PRG como fuente para despertar.
+ * -# Baja la CPU a 80 MHz para ahorrar batería.
+ * -# Enciende VEXT y prepara la lectura de la batería.
+ * -# Inicia la pantalla.
+ * -# Enciende el FEM e inicia la radio; si falla, se detiene con "ERROR DE RADIO".
+ * -# Carga las credenciales LoRaWAN y los nonces guardados; si hay una sesión en memoria RTC, la
+ *    restaura sin salir al aire. El join en sí se hace en loop() para no bloquear el arranque.
+ * -# Inicia el servidor BLE con el nombre "EcoGuard-" y los últimos 4 dígitos del DevEUI.
+ */
 void setup() {
     Serial.begin(115200);
 
@@ -456,31 +759,22 @@ void setup() {
     mostrarEnPantalla(nombreBLE, "DevEUI:", textoDevEUI);
 }
 
+/**
+ * @brief Ciclo principal, cada ~100 ms.
+ *
+ * -# Atiende el botón PRG.
+ * -# Apaga la pantalla tras TIEMPO_PANTALLA_ACTIVA sin cambios.
+ * -# Muestra los cambios de conexión del teléfono.
+ * -# Atiende los pedidos de SOS y de cancelación (del teléfono o del botón). Un SOS hace que la
+ *    primera trama salga de inmediato.
+ * -# Sin red, intenta unirse cada REINTENTO_JOIN. Con red, envía la siguiente trama cuando toca:
+ *    cada INTERVALO_SOS con alerta o cancelación pendiente, y cada INTERVALO_REPORTE si no. La
+ *    cancelación se da por terminada con el ACK o tras MAX_INTENTOS_CANCELACION envíos.
+ */
 void loop() {
-    // --- LÓGICA DEL BOTÓN MULTIFUNCIÓN ---
-    if (digitalRead(BOTON_PRG) == LOW) {
-        unsigned long tiempoInicioPresion = millis();
-        bool esApagado = false;
-
-        // Revisar cuánto tiempo se mantiene presionado
-        while (digitalRead(BOTON_PRG) == LOW) {
-            if (millis() - tiempoInicioPresion >= 3000) { // 3 segundos para apagar
-                esApagado = true;
-                break;
-            }
-            delay(10);
-        }
-
-        if (esApagado) {
-            // --- ACCIÓN: APAGADO (DEEP SLEEP) ---
-            apagarNodo();
-        } else {
-            // --- ACCIÓN: CLIC CORTO (DESPERTAR PANTALLA CON EL ESTADO) ---
-            mostrarEnPantalla(modoSOS ? "SOS ACTIVO" : "Heltec Activo",
-                              enRed() ? TEXTO_EN_RED : "Sin red LoRaWAN",
-                              textoDevEUI);
-        }
-    }
+    // --- BOTÓN FÍSICO ---
+    if (digitalRead(BOTON_PRG) == HIGH) esperarSoltarBoton = false;
+    else if (!esperarSoltarBoton) atenderBoton();
 
     // --- GESTIÓN DE APAGADO DE PANTALLA (Inactividad) ---
     if (pantallaEncendida && (millis() - tiempoUltimaAccion > TIEMPO_PANTALLA_ACTIVA)) {

@@ -1,0 +1,119 @@
+# Configuración de Doxygen para EcoGuard. Requiere Doxygen 1.11 o posterior (probado con 1.18):
+# el LaTeX de la 1.10 usa el paquete tabu, que ya no compila con MiKTeX ni TeX Live actuales.
+# Los filtros de Dart y TypeScript requieren además Python, Node.js y `pnpm install` en frontend/.
+#
+# Uso: generar_documentacion.bat (en esta carpeta), o a mano desde esta carpeta:
+#   doxygen Doxyfile                    -> docs/doxygen/html y docs/doxygen/latex
+#   doxygen\latex\make.bat              -> docs/doxygen/latex/refman.pdf
+#
+# Solo se listan las opciones que cambian respecto a los valores por defecto de Doxygen.
+# La lista completa y su explicación: doxygen -g Doxyfile.completo
+
+#---------------------------------------------------------------------------
+# Proyecto
+#---------------------------------------------------------------------------
+PROJECT_NAME           = EcoGuard
+PROJECT_BRIEF          = "Sistema de rescate LoRaWAN para parques ecoturísticos"
+OUTPUT_DIRECTORY       = doxygen
+OUTPUT_LANGUAGE        = Spanish
+
+# Las rutas se muestran desde la raíz del repositorio (p. ej. EcoGuard-Node/src/main.cpp)
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = ..
+
+#---------------------------------------------------------------------------
+# Lenguajes
+#---------------------------------------------------------------------------
+# Python: los docstrings se procesan como comentarios de Doxygen, así que admiten @brief, @param,
+# @return, etc. Los atributos se documentan con un bloque de comentarios "##" justo antes.
+PYTHON_DOCSTRING       = NO
+# Recomendado por Doxygen para Python: organiza la salida por paquetes y módulos
+OPTIMIZE_OUTPUT_JAVA   = YES
+MARKDOWN_SUPPORT       = YES
+
+# Dart (app del visitante), TypeScript y Svelte (panel del vigilante): Doxygen no los entiende, así
+# que cada archivo pasa por un filtro que lo traduce a declaraciones de C++ con los mismos
+# comentarios (ver los comentarios de cada filtro). Requieren Python y Node.js en el PATH; el de
+# TypeScript usa el compilador instalado en frontend/node_modules (pnpm install).
+EXTENSION_MAPPING      = dart=C++ \
+                         ts=C++ \
+                         svelte=C++
+FILTER_PATTERNS        = "*.dart=python filtros/dart_a_doxygen.py" \
+                         "*.ts=node filtros/ts_a_doxygen.mjs" \
+                         "*.svelte=node filtros/ts_a_doxygen.mjs"
+
+#---------------------------------------------------------------------------
+# Qué se extrae
+#---------------------------------------------------------------------------
+# Solo lo documentado; lo que falte aparece como advertencia
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+HIDE_UNDOC_MEMBERS     = YES
+HIDE_UNDOC_CLASSES     = YES
+# Conserva el orden del código: en los modelos y en el firmware el orden tiene sentido
+SORT_MEMBER_DOCS       = NO
+# Meta: clases internas de configuración de Django. SECRET_KEY: no debe aparecer en la documentación
+EXCLUDE_SYMBOLS        = Meta \
+                         SECRET_KEY
+
+#---------------------------------------------------------------------------
+# Archivos de entrada
+#---------------------------------------------------------------------------
+INPUT                  = principal.md \
+                         ../EcoGuard-Node/src \
+                         ../EcoGuard-Node/include/lorawan_config.example.h \
+                         ../backend/ecoguard \
+                         ../backend/geolocalizacion \
+                         ../ecoguard_app/lib \
+                         ../frontend/src/lib \
+                         ../frontend/src/routes
+USE_MDFILE_AS_MAINPAGE = principal.md
+FILE_PATTERNS          = *.cpp *.h *.py *.dart *.ts *.svelte
+RECURSIVE              = YES
+# lorawan_config.h tiene las llaves LoRaWAN del nodo: nunca se procesa.
+# index.ts es el archivo vacío que crea SvelteKit para el alias $lib
+EXCLUDE                = ../EcoGuard-Node/include/lorawan_config.h \
+                         ../frontend/src/lib/index.ts
+EXCLUDE_PATTERNS       = */migrations/* \
+                         */__pycache__/* \
+                         */tests.py
+
+#---------------------------------------------------------------------------
+# Advertencias
+#---------------------------------------------------------------------------
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_NO_PARAMDOC       = YES
+WARN_LOGFILE           = doxygen/advertencias.txt
+
+#---------------------------------------------------------------------------
+# Salida HTML
+#---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_TREEVIEW      = YES
+
+#---------------------------------------------------------------------------
+# Salida LaTeX (PDF con pdflatex)
+#---------------------------------------------------------------------------
+GENERATE_LATEX         = YES
+LATEX_OUTPUT           = latex
+USE_PDFLATEX           = YES
+PDF_HYPERLINKS         = YES
+PAPER_TYPE             = letter
+LATEX_BATCHMODE        = YES
+# Muestra como | ? { } los caracteres Unicode que escriben los filtros de Dart y TypeScript
+LATEX_EXTRA_STYLESHEET = filtros/simbolos_unicode.sty
+
+#---------------------------------------------------------------------------
+# Código fuente y diagramas
+#---------------------------------------------------------------------------
+# No se copia el código en la documentación, solo sus comentarios
+SOURCE_BROWSER         = NO
+VERBATIM_HEADERS       = NO
+# Graphviz no es necesario: la herencia se muestra como texto
+HAVE_DOT               = NO
+CLASS_GRAPH            = TEXT

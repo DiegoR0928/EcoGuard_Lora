@@ -1,0 +1,296 @@
+{
+  "type": "FeatureCollection",
+  "nombre": "Ruta piloto EcoGuard - Campus UAZ Siglo XXI",
+  "descripcion": "Gateway y puntos de control para las pruebas de campo (SRS: RNF-02 tasa de entrega por punto, RNF-07 exactitud contra puntos de referencia). Las coordenadas son aproximadas, tomadas de OpenStreetMap: reemplazarlas por las levantadas en sitio y marcar levantado_en_sitio=true. edificios_en_trayectoria es una estimación en planta (2D) de la línea de vista desde el gateway; no considera alturas ni relieve.",
+  "fuente": "© OpenStreetMap contributors, ODbL (consultado el 2026-10-05)",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -102.642665,
+          22.773256
+        ]
+      },
+      "properties": {
+        "tipo": "gateway",
+        "nombre": "Gateway EcoGuard",
+        "gateway_eui": "0016C001FF10A235",
+        "edificio": "Ingeniería Eléctrica",
+        "osm_way": 1312138280,
+        "altura_antena_m": null,
+        "levantado_en_sitio": false,
+        "nota": "Centro del edificio en OpenStreetMap. Registrar la posición y altura reales de la antena. gateway_eui es el del gateway simulado: reemplazarlo por el del gateway real."
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -102.64472,
+          22.77227
+        ]
+      },
+      "properties": {
+        "tipo": "punto_control",
+        "id": "PC-1",
+        "nombre": "Plaza LILEX",
+        "distancia_gateway_m": 238,
+        "rumbo_grados": 243,
+        "edificios_en_trayectoria": [
+          "Posgrados Ingenieria",
+          "Robótica y Mecatrónica"
+        ],
+        "condicion_estimada": "obstrucción parcial",
+        "levantado_en_sitio": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -102.6438,
+          22.77146
+        ]
+      },
+      "properties": {
+        "tipo": "punto_control",
+        "id": "PC-2",
+        "nombre": "Explanada central",
+        "distancia_gateway_m": 231,
+        "rumbo_grados": 210,
+        "edificios_en_trayectoria": [
+          "Edificio Ciencias Químicas",
+          "sin nombre",
+          "Oxxo",
+          "Cafetería Ciencias Químicas"
+        ],
+        "condicion_estimada": "obstruida",
+        "levantado_en_sitio": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -102.64384,
+          22.76969
+        ]
+      },
+      "properties": {
+        "tipo": "punto_control",
+        "id": "PC-3",
+        "nombre": "Andador auditorio",
+        "distancia_gateway_m": 415,
+        "rumbo_grados": 197,
+        "edificios_en_trayectoria": [
+          "Edificio Ciencias Químicas",
+          "Unidad Academica Ciencias Quimicas",
+          "Auditorio Universitario UAZ",
+          "Edificio de Posgrados de Enfermería UAZ (Construcción)"
+        ],
+        "condicion_estimada": "obstruida",
+        "levantado_en_sitio": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -102.64588,
+          22.76889
+        ]
+      },
+      "properties": {
+        "tipo": "punto_control",
+        "id": "PC-4",
+        "nombre": "Cancha de futbol americano",
+        "distancia_gateway_m": 587,
+        "rumbo_grados": 214,
+        "edificios_en_trayectoria": [
+          "CASE",
+          "Edificio Ciencias Químicas",
+          "Lic. en Cultura Física y Deporte",
+          "sin nombre",
+          "Nutrición",
+          "Cafetería Siglo XXI UAZ (Proyecto)",
+          "Aulas CASE UAZ (Construcción)",
+          "Cafetería Ciencias Químicas"
+        ],
+        "condicion_estimada": "muy obstruida (peor caso)",
+        "levantado_en_sitio": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -102.64189,
+          22.76885
+        ]
+      },
+      "properties": {
+        "tipo": "punto_control",
+        "id": "PC-5",
+        "nombre": "Acceso principal",
+        "distancia_gateway_m": 497,
+        "rumbo_grados": 171,
+        "edificios_en_trayectoria": [
+          "E1",
+          "Turismo UAZ"
+        ],
+        "condicion_estimada": "obstrucción parcial",
+        "levantado_en_sitio": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -102.6394,
+          22.76941
+        ]
+      },
+      "properties": {
+        "tipo": "punto_control",
+        "id": "PC-6",
+        "nombre": "Hospital veterinario",
+        "distancia_gateway_m": 544,
+        "rumbo_grados": 142,
+        "edificios_en_trayectoria": [
+          "Turismo UAZ",
+          "Ingenieria Electrica"
+        ],
+        "condicion_estimada": "obstrucción parcial",
+        "levantado_en_sitio": false,
+        "nota": "La coordenada cae dentro del edificio: levantar el punto en el exterior, del lado del gateway."
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -102.6453313,
+              22.7750603
+            ],
+            [
+              -102.6441421,
+              22.7746034
+            ],
+            [
+              -102.6437457,
+              22.774512
+            ],
+            [
+              -102.6430715,
+              22.7742002
+            ],
+            [
+              -102.6423645,
+              22.7736128
+            ],
+            [
+              -102.6418732,
+              22.773173
+            ],
+            [
+              -102.6417008,
+              22.7730154
+            ],
+            [
+              -102.6415961,
+              22.7728908
+            ],
+            [
+              -102.6415141,
+              22.7726917
+            ],
+            [
+              -102.6414532,
+              22.7724738
+            ],
+            [
+              -102.6413592,
+              22.7722308
+            ],
+            [
+              -102.6412274,
+              22.7718876
+            ],
+            [
+              -102.6410538,
+              22.771372
+            ],
+            [
+              -102.6410527,
+              22.7708279
+            ],
+            [
+              -102.6401061,
+              22.7701807
+            ],
+            [
+              -102.6394792,
+              22.7697272
+            ],
+            [
+              -102.6393967,
+              22.7696597
+            ],
+            [
+              -102.6390768,
+              22.7693377
+            ],
+            [
+              -102.6398308,
+              22.7692117
+            ],
+            [
+              -102.6418931,
+              22.7688476
+            ],
+            [
+              -102.6421733,
+              22.7687979
+            ],
+            [
+              -102.6445406,
+              22.7683842
+            ],
+            [
+              -102.6463435,
+              22.7680245
+            ],
+            [
+              -102.6468813,
+              22.7680692
+            ],
+            [
+              -102.6483865,
+              22.768311
+            ],
+            [
+              -102.6453313,
+              22.7750603
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "tipo": "perimetro",
+        "nombre": "Campus UAZ Siglo XXI",
+        "osm_way": 551736816
+      }
+    }
+  ]
+}
